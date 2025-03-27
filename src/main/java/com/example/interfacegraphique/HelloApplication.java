@@ -14,7 +14,12 @@ public class HelloApplication extends Application {
         Scene scene = new Scene(fxmlLoader.load(), 559, 479);
         stage.setTitle("Polaris");
         stage.setScene(scene);
+
+        stage.sizeToScene();
+
         stage.show();
+
+
     }
 
     public static void main(String[] args) {

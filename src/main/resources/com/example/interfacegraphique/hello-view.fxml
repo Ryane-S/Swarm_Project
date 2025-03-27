@@ -7,6 +7,9 @@
 <AnchorPane fx:id="root" maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" prefHeight="400.0" prefWidth="600.0" xmlns="http://javafx.com/javafx/17.0.12" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.example.interfacegraphique.HelloController">
    <children>
       <ImageView fx:id="backgroundImage" mouseTransparent="true" pickOnBounds="true" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0" />
-      <Button fx:id="loadingButton" mnemonicParsing="false" text="Button" AnchorPane.bottomAnchor="180.0" AnchorPane.leftAnchor="180.0" AnchorPane.rightAnchor="180.0" AnchorPane.topAnchor="180.0" />
+      <Button fx:id="loadingButton" mnemonicParsing="false" onAction="#onClickButton" prefHeight="55.0" prefWidth="55.0" text="Loading Image" AnchorPane.bottomAnchor="180.0" AnchorPane.leftAnchor="180.0" AnchorPane.rightAnchor="180.0" AnchorPane.topAnchor="180.0" />
+      <Label fx:id="label" alignment="TOP_CENTER" layoutX="69.0" layoutY="258.0" prefHeight="20.0" prefWidth="474.0" AnchorPane.bottomAnchor="122.0" AnchorPane.leftAnchor="69.0" AnchorPane.rightAnchor="57.0" AnchorPane.topAnchor="258.0" />
+      <ProgressBar layoutX="386.0" layoutY="26.0" prefWidth="200.0" progress="0.0" />
+      <TextArea fx:id="bebou" prefHeight="20.0" prefWidth="121.0" text="POLARIS" />
    </children>
 </AnchorPane>
