@@ -28,7 +28,7 @@ from spg_overlay.utils.utils import normalize_angle
 
 from maps.map_random import MyMapRandom
 
-from .geometry import Point, Line, Box
+from ..team_of_the_south.geometry import Point, Line, Box
 
 # Classe où le drône stocke les données importantes de la map
 class Stockage():

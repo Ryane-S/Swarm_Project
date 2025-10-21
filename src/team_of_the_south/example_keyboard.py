@@ -25,8 +25,8 @@ from spg_overlay.gui_map.map_abstract import MapAbstract
 from spg_overlay.utils.misc_data import MiscData
 
 
-from solutions.geometry import Point, Line, Box, build_box_with_line_and_point, detect_local_zones, build_box_with_2_opposite_points
-from examples.walls_keyboard import add_walls
+from team_of_the_south.geometry import Point, Line, Box, build_box_with_line_and_point, detect_local_zones, build_box_with_2_opposite_points
+from team_of_the_south.walls_keyboard import add_walls
 
 # Classe où le drône stocke les données importantes de la map
 class Stockage():
@@ -196,8 +196,6 @@ class MyDroneKeyboard(DroneAbstract):
         # EXPLORING STATE
         if self.state == self.Activity.EXPLORING:
 
-            #self.display_lidar_graph()
-
             # Updates the return area position if the drone enters it or leaves it
             if self.data.drone_start_position is None and self.is_inside_return_area == True:
                 self.data.drone_start_position = Point(self.measured_gps_position()[0], self.measured_gps_position()[1])
@@ -256,7 +254,6 @@ class MyDroneKeyboard(DroneAbstract):
 
             elif data.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON:
                 self.data.update_wounded_position((new_point))
-                print(len(self.data.wounded_position))
 
         else: # WALL
             new_point_1 = self.actual_drone_position.add(orientation, values_features[0], angles_features[0])
@@ -279,7 +276,7 @@ class MyMapKeyboard(MapAbstract):
         self._return_area = ReturnArea(size=(150, 100))
         self._return_area_pos = ((0, -20), 0)
         
-        self._wounded_persons_pos = [(200, 0), (-200, 0),
+        self._wounded_persons_pos = [(250, 0), (-200, 0),
                                      (200, -200), (-200, -200)]
 
         self._number_wounded_persons = len(self._wounded_persons_pos)
