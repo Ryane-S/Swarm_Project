@@ -321,7 +321,7 @@ class MyDroneTest(DroneAbstract):
                     self.path.return_area_postion = self.data.return_area.get_center()
 
             # Checks the surroundigs using both lidar THEN semantic sensors
-            print(self.display_lidar_graph())
+            self.display_lidar_graph()
             self.process_lidar_semantic_sensors()
 
         # RESCUING STATE
