@@ -27,6 +27,7 @@ from swarm_rescue.simulation.elements.return_area import ReturnArea
 from swarm_rescue.simulation.elements.wounded_person import WoundedPerson
 from swarm_rescue.simulation.gui_map.closed_playground import ClosedPlayground
 from swarm_rescue.simulation.gui_map.gui_sr import GuiSR
+from swarm_rescue.maps.map_intermediate_01 import MapIntermediate01
 from swarm_rescue.simulation.gui_map.map_abstract import MapAbstract
 from swarm_rescue.simulation.utils.misc_data import MiscData
 
@@ -321,7 +322,6 @@ class MyDroneTest(DroneAbstract):
                     self.path.return_area_postion = self.data.return_area.get_center()
 
             # Checks the surroundigs using both lidar THEN semantic sensors
-            self.display_lidar_graph()
             self.process_lidar_semantic_sensors()
 
         # RESCUING STATE
@@ -425,7 +425,6 @@ class MyMapKeyboard(MapAbstract):
             self._drones.append(drone)
             self._playground.add(drone, self._drones_pos[i])
 
-
 def print_keyboard_man():
     print("How to use the keyboard to direct the drone?")
     print("\t- up / down key : forward and backward")
@@ -443,7 +442,7 @@ def print_keyboard_man():
 
 def main():
     print_keyboard_man()
-    the_map = MyMapKeyboard(drone_type=MyDroneTest)
+    the_map = MapIntermediate01(drone_type=MyDroneTest)
 
     # draw_lidar_rays : enable the visualization of the lidar rays
     # draw_semantic_rays : enable the visualization of the semantic rays
