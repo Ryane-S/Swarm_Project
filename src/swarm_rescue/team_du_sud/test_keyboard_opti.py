@@ -35,313 +35,227 @@ from swarm_rescue.simulation.utils.misc_data import MiscData
 from swarm_rescue.team_du_sud.geometry_opti import *
 from swarm_rescue.team_du_sud.walls_keyboard import add_walls
 
-class OccupancyGrid(Grid):
-    """Simple occupancy grid"""
 
-    def __init__(self,
-                 size_area_world,
-                 resolution: float,
-                 lidar):
-        super().__init__(size_area_world=size_area_world,
-                         resolution=resolution)
+class StockageMesh:
+    EMPTY = 0
+    RETURN_AREA = 1
+    RESCUE_CENTER = 2
+    WOUNDED = 3
+    WALL = 4
 
-        self.size_area_world = size_area_world
-        self.resolution = resolution
+    # Priorité des valeurs pour l'écrasement (pas encore fonctionnel)
+    PRIORITY = {
+        EMPTY: 1,
+        RETURN_AREA: 5,
+        RESCUE_CENTER: 10,
+        WOUNDED: 10,
+        WALL: 3
+    }
 
-        self.lidar = lidar
+    def __init__(self, cell_size=10, initial_size=5):
+        self.cell_size = float(cell_size)
+        self.mesh = None
+        self.origin = None
+        self.offset = np.array([0, 0], dtype=int)
+        self.initial_size = int(initial_size)
+        self.wounded_positions = {}
+        self.rescue_center_positions = {}
 
-        self.x_max_grid: int = int(self.size_area_world[0] / self.resolution
-                                   + 0.5)
-        self.y_max_grid: int = int(self.size_area_world[1] / self.resolution
-                                   + 0.5)
+    def initialize_mesh(self, drone_pos):
+        self.origin = np.array(drone_pos, dtype=float)
+        s = max(3, self.initial_size)
+        self.mesh = np.zeros((s, s), dtype=float)
+        self.offset = np.array([s // 2, s // 2], dtype=int)
 
-        self.grid = np.zeros((self.x_max_grid, self.y_max_grid))
-        self.zoomed_grid = np.empty((self.x_max_grid, self.y_max_grid))
-
-    def update_grid(self, pose: Pose):
-        """
-        Bayesian map update with new observation
-        lidar : lidar data
-        pose : corrected pose in world coordinates
-        """
-        EVERY_N = 3
-        LIDAR_DIST_CLIP = 40.0
-        EMPTY_ZONE_VALUE = -0.602
-        OBSTACLE_ZONE_VALUE = 2.0
-        FREE_ZONE_VALUE = -4.0
-        THRESHOLD_MIN = -40
-        THRESHOLD_MAX = 40
-
-        lidar_dist = self.lidar.get_sensor_values()[::EVERY_N].copy()
-        lidar_angles = self.lidar.ray_angles[::EVERY_N].copy()
-
-        # Compute cos and sin of the absolute angle of the lidar
-        cos_rays = np.cos(lidar_angles + pose.orientation)
-        sin_rays = np.sin(lidar_angles + pose.orientation)
-
-        max_range = MAX_RANGE_LIDAR_SENSOR * 0.9
-
-        # For empty zones
-        # points_x and point_y contains the border of detected empty zone
-        # We use a value a little bit less than LIDAR_DIST_CLIP because of the
-        # noise in lidar
-        lidar_dist_empty = np.maximum(lidar_dist - LIDAR_DIST_CLIP, 0.0)
-        # All values of lidar_dist_empty_clip are now <= max_range
-        lidar_dist_empty_clip = np.minimum(lidar_dist_empty, max_range)
-        points_x = pose.position[0] + np.multiply(lidar_dist_empty_clip,
-                                                  cos_rays)
-        points_y = pose.position[1] + np.multiply(lidar_dist_empty_clip,
-                                                  sin_rays)
-
-        for pt_x, pt_y in zip(points_x, points_y):
-            self.add_value_along_line(pose.position[0], pose.position[1],
-                                      pt_x, pt_y,
-                                      EMPTY_ZONE_VALUE)
-
-        # For obstacle zones, all values of lidar_dist are < max_range
-        select_collision = lidar_dist < max_range
-
-        points_x = pose.position[0] + np.multiply(lidar_dist, cos_rays)
-        points_y = pose.position[1] + np.multiply(lidar_dist, sin_rays)
-
-        points_x = points_x[select_collision]
-        points_y = points_y[select_collision]
-
-        self.add_points(points_x, points_y, OBSTACLE_ZONE_VALUE)
-
-        # the current position of the drone is free !
-        self.add_points(pose.position[0], pose.position[1], FREE_ZONE_VALUE)
-
-        # threshold values
-        self.grid = np.clip(self.grid, THRESHOLD_MIN, THRESHOLD_MAX)
-
-        # compute zoomed grid for displaying
-        self.zoomed_grid = self.grid.copy()
-        new_zoomed_size = (int(self.size_area_world[1] * 0.5),
-                           int(self.size_area_world[0] * 0.5))
-        self.zoomed_grid = cv2.resize(self.zoomed_grid, new_zoomed_size,
-                                      interpolation=cv2.INTER_NEAREST)
-
-# --------------------------
-# STOCKAGE CLASS
-# --------------------------
-
-class Stockage():
-    def __init__(self):
-        self.drone_start_position = None
-        self.rescue_center = None
-        self.return_area = None
-        self.wounded_position = []
-        self.walls_positions = []
-        self.NoGPS_position = None
-
-    # RETURN AREA
-    def initialize_return_area_position(self, pose):
-        if self.drone_start_position[0] == pose.position[0]:
-            self.return_area = line(self.drone_start_position, pose.position)
-        elif self.drone_start_position[1] == pose.position[1]:
-            self.return_area = line(self.drone_start_position, pose.position)
-        else:
-            self.return_area = box_from_two_points(self.drone_start_position, pose.position)
-
-    def update_return_area_position(self, pose):
-        if self.return_area is None:
-            self.initialize_return_area_position(pose)
+    # Convertir des coordonnées réelles en indices de cellule
+    def coord_to_cell(self, pos):
+        delta = (np.array(pos, dtype=float) - self.origin) / self.cell_size
+        i = int(np.floor(delta[1])) + int(self.offset[0])
+        j = int(np.floor(delta[0])) + int(self.offset[1])
+        return i, j
+    
+    # Étendre la grille si nécessaire pour inclure une cellule donnée et adapter les positions
+    def extend_if_needed(self, i, j):
+        h, w = self.mesh.shape
+        top = max(0, -i)
+        left = max(0, -j)
+        bottom = max(0, i - (h - 1))
+        right = max(0, j - (w - 1))
+        if top == left == bottom == right == 0:
             return
+        new_h = top + h + bottom
+        new_w = left + w + right
+        new_mesh = np.zeros((new_h, new_w), dtype=float)
+        new_mesh[top:top+h, left:left+w] = self.mesh
+        self.mesh = new_mesh
+        self.offset += np.array([top, left], dtype=int)
+        for wid in self.wounded_positions:
+            old_i, old_j = self.wounded_positions[wid]
+            self.wounded_positions[wid] = (old_i + top, old_j + left)
+        for cid in self.rescue_center_positions:
+            old_i, old_j = self.rescue_center_positions[cid]
+            self.rescue_center_positions[cid] = (old_i + top, old_j + left)
 
-        if self.return_area.shape[0]==4:  # it's a line
-            if is_on_line(self.return_area, pose.position):
-                return
-            else:
-                self.return_area = extend_line(self.return_area, pose.position)
-        else:
-            if box_contains(self.return_area, pose.position):
-                return
-            else:
-                self.return_area = extend_box(self.return_area, pose.position)
-
-    # RESCUE CENTER
-    def update_rescue_center_position(self, new_point):
-        if self.rescue_center is None:
-            self.rescue_center = new_point
+    # Définir la valeur d'une cellule
+    def set_cell(self, pos, value):
+        if self.mesh is None:
+            self.initialize_mesh(pos)
+        i, j = self.coord_to_cell(pos)
+        self.extend_if_needed(i, j)
+        i, j = self.coord_to_cell(pos)
+        current = int(self.mesh[i, j])
+        if value == self.EMPTY and current in [self.WALL, self.WOUNDED, self.RESCUE_CENTER]:
+            self.mesh[i, j] = self.EMPTY
             return
+        if self.PRIORITY[value] >= self.PRIORITY.get(current, 0):
+            self.mesh[i, j] = value
 
-        if self.rescue_center.shape[0]==2:  # Point
-            if np.allclose(new_point, self.rescue_center): return
-            if new_point[0]==self.rescue_center[0]:
-                self.rescue_center = line(self.rescue_center, new_point)
-            elif new_point[1]==self.rescue_center[1]:
-                self.rescue_center = line(self.rescue_center, new_point)
-            else:
-                self.rescue_center = box_from_two_points(self.rescue_center, new_point)
-        elif self.rescue_center.shape[0]==4:  # Line
-            if is_on_line(self.rescue_center, new_point):
-                return
-            else:
-                self.rescue_center = extend_line(self.rescue_center, new_point)
-        else:  # Box
-            self.rescue_center = extend_box(self.rescue_center, new_point)
+    # Marquer une personne blessée avec un W
+    def mark_wounded(self, pos, wid=0):
+        i, j = self.coord_to_cell(pos)
+        self.extend_if_needed(i, j)
+        i, j = self.coord_to_cell(pos)
+        if wid in self.wounded_positions:
+            old_i, old_j = self.wounded_positions[wid]
+            if (old_i, old_j) != (i, j) and self.mesh[old_i, old_j] == self.WOUNDED:
+                self.mesh[old_i, old_j] = self.EMPTY
+        self.mesh[i, j] = self.WOUNDED
+        self.wounded_positions[wid] = (i, j)
 
-    # WOUNDED
-    def update_wounded_position(self, new_point):
-        for i, wounded in enumerate(self.wounded_position):
-            if distance(wounded, new_point)<60:
-                self.wounded_position[i]=new_point
-                return
-        self.wounded_position.append(new_point)
+    # Marquer le centre de secours avec un C
+    def mark_rescue_center(self, pos, cid=0):
+        i, j = self.coord_to_cell(pos)
+        self.extend_if_needed(i, j)
+        i, j = self.coord_to_cell(pos)
+        if cid in self.rescue_center_positions:
+            old_i, old_j = self.rescue_center_positions[cid]
+            if (old_i, old_j) != (i, j) and self.mesh[old_i, old_j] == self.RESCUE_CENTER:
+                self.mesh[old_i, old_j] = self.EMPTY
+        self.mesh[i, j] = self.RESCUE_CENTER
+        self.rescue_center_positions[cid] = (i, j)
 
-    # WALLS
-    def update_walls_positions(self, p1, p2, middle):
-        t, _ = are_aligned(np.vstack([p1,p2]))
-        if t=="undefined": return
+    # Marquer les murs avec un #
+    def mark_wall_between(self, p1, p2):
+        p0 = np.array(p1, dtype=float)
+        p1 = np.array(p2, dtype=float)
+        dist = np.linalg.norm(p1 - p0)
+        if dist == 0:
+            self.set_cell(p0, self.WALL)
+            return
+        steps = max(2, int(np.ceil(dist / (self.cell_size * 0.5))))
+        for t in np.linspace(0, 1, steps):
+            pt = p0 * (1 - t) + p1 * t
+            self.set_cell(pt, self.WALL)
 
-        if t=="vertical":
-            h = max(abs(p1[1]), abs(p2[1]))
-            wall = np.hstack([point(middle[0]-3,h), point(middle[0]+3,h),
-                              point(middle[0]+3,-h), point(middle[0]-3,-h)])
+    # Mise à jour dynamique d'une cellule d'un mur
+    def update_wall_cell(self, pos, is_wall):
+        if is_wall:
+            self.set_cell(pos, self.WALL)
         else:
-            l = max(abs(p1[0]), abs(p2[0]))
-            wall = np.hstack([point(l,middle[1]-3), point(l,middle[1]+3),
-                              point(-l,middle[1]+3), point(-l,middle[1]-3)])
-        self.walls_positions.append(wall)
+            # si pas de mur, redevenir EMPTY (fonctionne pas encore très bien)
+            i, j = self.coord_to_cell(pos)
+            self.extend_if_needed(i, j)
+            i, j = self.coord_to_cell(pos)
+            if self.mesh[i, j] == self.WALL:
+                self.mesh[i, j] = self.EMPTY
 
-class Path():
-    def _init_(self):
-        self.strategic_points = []
-        self.return_area_postion = None
-        self.rescue_center_position = None
+    # Marquer la return area avec un R
+    def mark_return_area(self, pos):
+        self.set_cell(pos, self.RETURN_AREA)
 
-# --------------------------
-# DRONE CLASS
-# --------------------------
+    # Afficher la grille avec des symboles dans le terminal (bouger le drone en meme temps pour maj la grille)
+    def print_mesh(self, symbols=None):
+        if self.mesh is None:
+            return
+        if symbols is None:
+            symbols = {self.EMPTY: ".", self.RETURN_AREA: "R", self.RESCUE_CENTER: "C",
+                       self.WOUNDED: "W", self.WALL: "#"}
+        for row in self.mesh[::-1]:
+            print("".join(symbols.get(int(x), "?") for x in row))
 
-class MyDroneTest(DroneAbstract):
 
-    class Activity(Enum):
-        EXPLORING = 1
-        RESCUING = 2
-
-    class Rescuing_Activities(Enum):
-        GRASPING_WOUNDED = 3
-        DROPPING_AT_RESCUE_CENTER = 4
-
+class MyDrone(DroneAbstract):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.iteration = 0
-        self.pose = Pose()
-        self.grid = OccupancyGrid(size_area_world=self.size_area, resolution=8, lidar=self.lidar())
-        self.data = Stockage()
+        self.data_mesh = StockageMesh(cell_size=30, initial_size=7)
         self.path = Path()
-        self.state = self.Activity.EXPLORING
-        self.last_inside = False
+        # Rajouter un système permettant de déterminer si le drone est en exploration ou en sauvetage (cf test_keyboard.py)
 
     def define_message_for_all(self):
         pass
 
     def control(self):
-        command = {"forward":0.0,"lateral":0.0,"rotation":0.0,"grasper":0}
+        command: CommandsDict = {"forward": 0.0,
+                                 "lateral": 0.0,
+                                 "rotation": 0.0,
+                                 "grasper": 0}
+        
+        # Mettre à jour la position et l'orientation du drone
+        gps = np.asarray(self.measured_gps_position())
+        orientation = self.measured_compass_angle()
+        self.pose = Pose(gps, orientation)
 
-        self.iteration+=1
-        self.pose = Pose(np.asarray(self.measured_gps_position()), self.measured_compass_angle())
-        self.grid.update_grid(pose=self.pose)
+        # Initialisation de la grille si nécessaire
+        if self.data_mesh.mesh is None:
+            self.data_mesh.initialize_mesh(self.pose.position)
 
-        if self.iteration%5==0:
-            self.grid.display(self.grid.grid,self.pose)
-            self.grid.display(self.grid.zoomed_grid,self.pose)
+        # Marquer la return area si on y est
+        if self.is_inside_return_area:
+            self.data_mesh.mark_return_area(self.pose.position)
 
-        if self.state==self.Activity.EXPLORING:
-            if self.data.drone_start_position is None and self.is_inside_return_area:
-                self.data.drone_start_position=self.pose.position.copy()
-            elif self.is_inside_return_area != self.last_inside:
-                self.last_inside=self.is_inside_return_area
-                self.data.update_return_area_position(self.pose)
-                if self.data.return_area is not None:
-                    self.path.return_area_postion = box_center(self.data.return_area)
-            self.process_lidar_semantic_sensors()
+        # Traiter les données des capteurs lidar et sémantiques et update le mesh
+        self.process_lidar_semantic_sensors()
 
-        return command
+        # print le mesh toutes les 20 itérations (pour pas flood le terminal et pour controler les timestep)
+        if self.iteration % 20 == 0:
+            print("Mesh Actuel")
+            self.data_mesh.print_mesh()
+
+        self.iteration += 1
+        return command # Non définie pour l'instant
 
     def process_lidar_semantic_sensors(self):
-        lidar_values = self.lidar_values()
+        # Récupérer les valeurs du lidar et les zones d'intérêts (cf geometry_opti.py)
+        lidar_vals = self.lidar_values()
         lidar_angles = self.lidar_rays_angles()
-        zones = detect_local_zones(lidar_values)
-        angles_features = [[lidar_angles[i] for i in zone] for zone in zones]
+        zones = detect_local_zones(lidar_vals)
 
-        semantic_values = self.semantic_values()
-        if semantic_values is not None:
-            for data in semantic_values:
-                for i in range(len(angles_features)):
-                    if angles_features[i][0] <= data.angle <= angles_features[i][-1]:
-                        self.update_data(data=data)
-                        zones.pop(i)
-                        angles_features.pop(i)
-                        break
+        # Récupérer les valeurs sémantiques et itérer dessus pour marquer les entités détectées
+        semantic = self.semantic_values()
 
-        for i in range(len(zones)):
-            if len(zones[i])>2:
-                self.update_data(data=None,
-                                 values_features=[zones[i][0],zones[i][-1],zones[i][len(zones[i])//2]],
-                                 angles_features=[angles_features[i][0],angles_features[i][-1],angles_features[i][len(angles_features[i])//2]])
+        if semantic is not None:
+            for s in semantic:
+                # Calculer la position de l'entité détectée et la marquer dans la grille
+                ang = self.pose.orientation + s.angle
+                pos = self.pose.position + np.array([np.cos(ang), np.sin(ang)]) * s.distance
+                if s.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER:
+                    self.data_mesh.mark_rescue_center(pos)
+                elif s.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON:
+                    self.data_mesh.mark_wounded(pos)
 
-    def update_data(self, data=None, values_features=None, angles_features=None):
-        if data is not None:
-            new_point = add(self.pose.position, self.pose.orientation, data.distance, data.angle)
-            if data.entity_type==DroneSemanticSensor.TypeEntity.RESCUE_CENTER:
-                self.data.update_rescue_center_position(new_point)
-            elif data.entity_type==DroneSemanticSensor.TypeEntity.WOUNDED_PERSON:
-                self.data.update_wounded_position(new_point)
-        else:
-            p1 = add(self.pose.position, self.pose.orientation, values_features[0], angles_features[0])
-            p2 = add(self.pose.position, self.pose.orientation, values_features[1], angles_features[1])
-            pm = add(self.pose.position, self.pose.orientation, values_features[2], angles_features[2])
-            self.data.update_walls_positions(p1,p2,pm)
+        # Itérer sur les zones détectées pour marquer les murs dans la grille
+        if zones:
+            for zone in zones:
+                if len(zone) < 2:
+                    continue
+                idx_start = zone[0]
+                idx_end = zone[-1]
+                ang0 = self.pose.orientation + lidar_angles[idx_start]
+                ang1 = self.pose.orientation + lidar_angles[idx_end]
+                p0 = self.pose.position + np.array([np.cos(ang0), np.sin(ang0)]) * lidar_vals[idx_start]
+                p1 = self.pose.position + np.array([np.cos(ang1), np.sin(ang1)]) * lidar_vals[idx_end]
+                self.data_mesh.mark_wall_between(p0, p1)
 
-class MyMapKeyboard(MapAbstract):
+    # Appels des fonctions de marquage du mesh (à optimiser si besoin)
+    def mark_rescue_center(self, world_pos):
+        self.data_mesh.mark_rescue_center(world_pos)
 
-    def __init__(self, drone_type: Type[DroneAbstract]):
-        super().__init__(drone_type=drone_type)
+    def mark_wounded(self, world_pos):
+        self.data_mesh.mark_wounded(world_pos)
 
-        # PARAMETERS MAP
-        self._size_area = (600, 600)
-
-        self._rescue_center = RescueCenter(size=(100, 100))
-        self._rescue_center_pos = ((0, 100), 0)
-
-        self._return_area = ReturnArea(size=(150, 100))
-        self._return_area_pos = ((0, -20), 0)
-
-        self._wounded_persons_pos = [(200, 0), (-200, 0),
-                                     (200, -200), (-200, -200)]
-
-        self._number_wounded_persons = len(self._wounded_persons_pos)
-        self._wounded_persons: List[WoundedPerson] = []
-
-        self._number_drones = 1
-        self._drones_pos = [((0, 0), 0)]
-        self._drones = []
-
-        self._playground = ClosedPlayground(size=self._size_area)
-
-        self._playground.add(self._rescue_center, self._rescue_center_pos)
-
-        self._playground.add(self._return_area, self._return_area_pos)
-
-        # POSITIONS OF THE WOUNDED PERSONS
-        for i in range(self._number_wounded_persons):
-            wounded_person = WoundedPerson(rescue_center=self._rescue_center)
-            self._wounded_persons.append(wounded_person)
-            pos = (self._wounded_persons_pos[i], 0)
-            self._playground.add(wounded_person, pos)
-
-        # POSITIONS OF THE DRONES
-        misc_data = MiscData(size_area=self._size_area,
-                             number_drones=self._number_drones,
-                             max_timestep_limit=self._max_timestep_limit,
-                             max_walltime_limit=self._max_walltime_limit)
-        for i in range(self._number_drones):
-            drone = drone_type(identifier=i, misc_data=misc_data)
-            self._drones.append(drone)
-            self._playground.add(drone, self._drones_pos[i])
+    def mark_wall(self, p1, p2):
+        self.data_mesh.mark_wall_between(p1, p2)
 
 
 def print_keyboard_man():
@@ -361,7 +275,7 @@ def print_keyboard_man():
 
 def main():
     print_keyboard_man()
-    the_map = MapIntermediate01(drone_type=MyDroneTest)
+    the_map = MapIntermediate01(drone_type=MyDrone)
 
     # draw_lidar_rays : enable the visualization of the lidar rays
     # draw_semantic_rays : enable the visualization of the semantic rays
