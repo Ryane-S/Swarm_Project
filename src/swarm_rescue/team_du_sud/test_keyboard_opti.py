@@ -4,7 +4,7 @@ To move the drone, you have to click on the map, then use the arrows on the
 keyboard
 """
 
-import sys
+import sys, gc
 from pathlib import Path
 from typing import List, Type
 from enum import Enum
@@ -27,6 +27,8 @@ from swarm_rescue.simulation.elements.return_area import ReturnArea
 from swarm_rescue.simulation.elements.wounded_person import WoundedPerson
 from swarm_rescue.simulation.gui_map.closed_playground import ClosedPlayground
 from swarm_rescue.maps.map_intermediate_01 import MapIntermediate01
+from swarm_rescue.simulation.reporting.evaluation import ZonesConfig, EvalPlan, EvalConfig
+from swarm_rescue.simulation.elements.sensor_disablers import ZoneType, NoGpsZone
 from swarm_rescue.simulation.gui_map.gui_sr import GuiSR
 from swarm_rescue.simulation.gui_map.map_abstract import MapAbstract
 from swarm_rescue.simulation.utils.misc_data import MiscData
@@ -52,7 +54,7 @@ class StockageMesh:
         WALL: 3
     }
 
-    def __init__(self, cell_size=10, initial_size=5):
+    def __init__(self, cell_size=5, initial_size=5):
         self.cell_size = float(cell_size)
         self.mesh = None
         self.origin = None
@@ -127,10 +129,10 @@ class StockageMesh:
         i, j = self.coord_to_cell(pos)
         self.extend_if_needed(i, j)
         i, j = self.coord_to_cell(pos)
-        if cid in self.rescue_center_positions:
+        '''if cid in self.rescue_center_positions:
             old_i, old_j = self.rescue_center_positions[cid]
             if (old_i, old_j) != (i, j) and self.mesh[old_i, old_j] == self.RESCUE_CENTER:
-                self.mesh[old_i, old_j] = self.EMPTY
+                self.mesh[old_i, old_j] = self.EMPTY'''
         self.mesh[i, j] = self.RESCUE_CENTER
         self.rescue_center_positions[cid] = (i, j)
 
@@ -163,7 +165,7 @@ class StockageMesh:
     def mark_return_area(self, pos):
         self.set_cell(pos, self.RETURN_AREA)
 
-    # Afficher la grille avec des symboles dans le terminal (bouger le drone en meme temps pour maj la grille)
+    # Afficher la grille dynamiquement avec des symboles dans le terminal (bouger le drone en meme temps pour maj la grille)
     def print_mesh(self, symbols=None):
         if self.mesh is None:
             return
@@ -173,6 +175,18 @@ class StockageMesh:
         for row in self.mesh[::-1]:
             print("".join(symbols.get(int(x), "?") for x in row))
 
+    # Afficher la grille statique à partir d'une matrice donnée
+    def print_mesh_from_matrix(self, matrix, symbols=None):
+        if symbols is None:
+            symbols = {
+                int(self.EMPTY): ".",
+                int(self.RETURN_AREA): "R",
+                int(self.RESCUE_CENTER): "C",
+                int(self.WOUNDED): "W",
+                int(self.WALL): "#"
+            }
+        for row in matrix[::-1]:
+            print("".join(symbols.get(int(x), "?") for x in row))
 
 class MyDrone(DroneAbstract):
     def __init__(self, **kwargs):
@@ -209,8 +223,10 @@ class MyDrone(DroneAbstract):
 
         # print le mesh toutes les 20 itérations (pour pas flood le terminal et pour controler les timestep)
         if self.iteration % 20 == 0:
-            print("Mesh Actuel")
-            self.data_mesh.print_mesh()
+            print("Mesh actuel")
+            # On imprime une copie pour éviter les modifications pendant l'affichage du mesh (calculs en moins)
+            snapshot = self.data_mesh.mesh.copy()
+            self.data_mesh.print_mesh_from_matrix(snapshot)
 
         self.iteration += 1
         return command # Non définie pour l'instant
@@ -248,6 +264,7 @@ class MyDrone(DroneAbstract):
                 self.data_mesh.mark_wall_between(p0, p1)
 
     # Appels des fonctions de marquage du mesh (à optimiser si besoin)
+    '''
     def mark_rescue_center(self, world_pos):
         self.data_mesh.mark_rescue_center(world_pos)
 
@@ -256,6 +273,7 @@ class MyDrone(DroneAbstract):
 
     def mark_wall(self, p1, p2):
         self.data_mesh.mark_wall_between(p1, p2)
+    '''
 
 
 def print_keyboard_man():
@@ -275,14 +293,23 @@ def print_keyboard_man():
 
 def main():
     print_keyboard_man()
-    the_map = MapIntermediate01(drone_type=MyDrone)
 
-    # draw_lidar_rays : enable the visualization of the lidar rays
-    # draw_semantic_rays : enable the visualization of the semantic rays
+    eval_plan = EvalPlan()
+
+    zones_config: ZonesConfig = ()
+    eval_config = EvalConfig(map_name="MapIntermediate01", zones_config=zones_config, nb_rounds=2)
+    eval_plan.add(eval_config=eval_config)
+
+    gc.collect()
+
+    # Retrieve the class object from the global namespace using its name
+    map_class = globals().get(eval_config.map_name)
+    # Instantiate the map class with the provided zones configuration
+    the_map = map_class(drone_type=MyDrone, zones_config=eval_config.zones_config)
+
     gui = GuiSR(the_map=the_map,
-                draw_lidar_rays=False,
-                draw_semantic_rays=False,
-                use_keyboard=True,
+                use_mouse_measure=True,
+                use_keyboard=True
                 )
     gui.run()
 

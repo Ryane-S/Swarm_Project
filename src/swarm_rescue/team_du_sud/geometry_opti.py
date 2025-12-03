@@ -1,7 +1,7 @@
 import numpy as np
 
 # --------------------------
-# POINTS (2 coords)
+# POINTS (2 coords) -> (x,y)
 # --------------------------
 
 def point(x, y):
@@ -28,7 +28,7 @@ def are_aligned(points, eps=1e-6):
     return ("vertical", 1/ratio) if ratio < 1 else ("horizontal", ratio)
 
 # --------------------------
-# LINES (4 coords)
+# LINES (4 coords) -> (x1,y1,x2,y2)
 # --------------------------
 
 def line(p1, p2):
@@ -87,7 +87,7 @@ def extend_line(l, p, eps=1e-6):
 
 
 # --------------------------
-# BOXES (8 coords)
+# BOXES (8 coords) -> (x1,y1,x2,y2,x3,y3,x4,y4)
 # --------------------------
 
 # Order:
