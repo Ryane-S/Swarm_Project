@@ -130,7 +130,8 @@ class Box():
         self.point_2 = self.points[1]
         self.point_3 = self.points[2]
         self.point_4 = self.points[3]
-    
+        return self
+        
     def extend_box(self, point: Point):
         min_x, max_x, min_y, max_y = self.get_limits()
         if min_x >= point.x:
