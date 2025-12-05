@@ -47,7 +47,7 @@ class StockageMesh:
 
     # Priorité des valeurs pour l'écrasement (pas encore fonctionnel)
     PRIORITY = {
-        EMPTY: 1,
+        EMPTY: 3,
         RETURN_AREA: 5,
         RESCUE_CENTER: 10,
         WOUNDED: 10,
@@ -136,6 +136,9 @@ class StockageMesh:
         self.mesh[i, j] = self.RESCUE_CENTER
         self.rescue_center_positions[cid] = (i, j)
 
+    def mark_empty(self, pos):
+        self.set_cell(pos, self.EMPTY)
+
     # Marquer les murs avec un #
     def mark_wall_between(self, p1, p2):
         p0 = np.array(p1, dtype=float)
@@ -194,6 +197,7 @@ class MyDrone(DroneAbstract):
         self.iteration = 0
         self.data_mesh = StockageMesh(cell_size=30, initial_size=7)
         self.path = Path()
+        self.previous_HP = self.drone_health
         # Rajouter un système permettant de déterminer si le drone est en exploration ou en sauvetage (cf test_keyboard.py)
 
     def define_message_for_all(self):
@@ -218,6 +222,9 @@ class MyDrone(DroneAbstract):
         if self.is_inside_return_area:
             self.data_mesh.mark_return_area(self.pose.position)
 
+        if self.drone_health == self.previous_HP and not self.is_inside_return_area:
+            self.data_mesh.mark_empty(self.pose.position)
+
         # Traiter les données des capteurs lidar et sémantiques et update le mesh
         self.process_lidar_semantic_sensors()
 
@@ -229,6 +236,8 @@ class MyDrone(DroneAbstract):
             self.data_mesh.print_mesh_from_matrix(snapshot)
 
         self.iteration += 1
+
+        self.previous_HP = self.drone_health
         return command # Non définie pour l'instant
 
     def process_lidar_semantic_sensors(self):
