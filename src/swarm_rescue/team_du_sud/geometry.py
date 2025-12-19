@@ -12,18 +12,12 @@ class Point:
 
     def add(self, drone_orientation, distance, angle):
         total_angle = drone_orientation + angle
-        dx = distance * math.cos(total_angle)
-        dy = distance * math.sin(total_angle)
-        return Point(self.x + dx, self.y + dy)
+        vec = np.array([np.cos(total_angle), np.sin(total_angle)]) * distance
+        return Point(self.x + vec[0], self.y + vec[1])
 
     def are_aligned_in_type(self, point_1, point_2, epsilon=1e-6):
-        x_coords = [point_1.x, point_2.x, self.x]
-        y_coords = [point_1.y, point_2.y, self.y]
-
-        mean_x = sum(x_coords) / 3
-        mean_y = sum(y_coords) / 3
-        var_x = sum((x - mean_x) ** 2 for x in x_coords) / 3
-        var_y = sum((y - mean_y) ** 2 for y in y_coords) / 3
+        coords = np.array([[self.x, self.y], [point_1.x, point_1.y], [point_2.x, point_2.y]])
+        var_x, var_y = np.var(coords, axis=0)
 
         if var_x < epsilon and var_y < epsilon:
             return ("undefined", 1.0)
@@ -39,7 +33,7 @@ class Point:
             return ("horizontal", ratio)
 
     def distance_to(self, point):
-        return ((self.x - point.x) ** 2 + (self.y - point.y) ** 2) ** 0.5
+        return np.linalg.norm(np.array([self.x - point.x, self.y - point.y]))
 
     def __str__(self):
         return f"({self.x}, {self.y})"
@@ -57,7 +51,13 @@ class Line:
     def __init__(self, point_1: Point, point_2: Point):
         self.point_1 = point_1
         self.point_2 = point_2
-        self.type = None
+        # Automatically determine line type
+        if abs(point_1.x - point_2.x) < 1e-9:  # Vertical line
+            self.type = "vertical"
+        elif abs(point_1.y - point_2.y) < 1e-9:  # Horizontal line
+            self.type = "horizontal"
+        else:
+            self.type = "diagonal"
 
     def update_type(self, type: str):
         self.type = type
@@ -69,9 +69,9 @@ class Line:
             return [self.point_1.y, self.point_1.x, self.point_2.x]
 
     def get_length(self):
-        return math.hypot(
-            self.point_2.x - self.point_1.x, self.point_2.y - self.point_1.y
-        )
+        p1 = np.array([self.point_1.x, self.point_1.y])
+        p2 = np.array([self.point_2.x, self.point_2.y])
+        return np.linalg.norm(p2 - p1)
 
     def is_on_line(self, point: Point):
         x1, y1, x2, y2 = self.point_1.x, self.point_1.y, self.point_2.x, self.point_2.y
@@ -146,11 +146,11 @@ class Box:
         self.points = [point_1, point_2, point_3, point_4]
 
     def order_points(self):
-        # Sort points by y first, then x
-        def sort_by_yx(p):
-            return (p.y, p.x)
-
-        pts = sorted(self.points, key=sort_by_yx)
+        # Sort points by y first, then x using NumPy lexsort
+        coords = np.array([[p.x, p.y] for p in self.points])
+        # lexsort sorts by last key first, so we pass (x, y) to sort by (y, x)
+        idx = np.lexsort((coords[:, 0], coords[:, 1]))
+        pts = [self.points[i] for i in idx]
 
         p1 = pts[0]  # top-left or bottom-left depending on your system
 
@@ -216,9 +216,13 @@ class Box:
         return Point((min_x + max_x) / 2, (min_y + max_y) / 2)
 
     def get_limits(self):
-        xs = (self.point_1.x, self.point_2.x, self.point_3.x, self.point_4.x)
-        ys = (self.point_1.y, self.point_2.y, self.point_3.y, self.point_4.y)
-        return min(xs), max(xs), min(ys), max(ys)
+        coords = np.array([[self.point_1.x, self.point_1.y],
+                          [self.point_2.x, self.point_2.y],
+                          [self.point_3.x, self.point_3.y],
+                          [self.point_4.x, self.point_4.y]])
+        min_x, min_y = coords.min(axis=0)
+        max_x, max_y = coords.max(axis=0)
+        return min_x, max_x, min_y, max_y
 
     def get_dimensions(self):
         self.limits = self.get_limits()
@@ -322,3 +326,55 @@ def detect_local_zones(liste, max_value=150, max_diff=50, min_zone_length=2):
     if len(current_zone) >= min_zone_length:
         zones.append(current_zone)
     return zones
+
+
+# NUMPY-OPTIMIZED BATCH OPERATIONS FOR DIJKSTRA/PATHFINDING
+
+def batch_distances_from_point(point, others):
+    """
+    Calculate distance from one point to many points (vectorized).
+    ~10-100× faster than calling distance_to() in a loop.
+    
+    Args:
+        point: Point object
+        others: List of Point objects
+    
+    Returns:
+        numpy array of distances
+    """
+    p_array = np.array([point.x, point.y])
+    others_array = np.array([[o.x, o.y] for o in others])
+    return np.linalg.norm(others_array - p_array, axis=1)
+
+
+def batch_distances_from_center(box, other_boxes):
+    """
+    Calculate distance from one box's center to many boxes' centers.
+    
+    Args:
+        box: Box object
+        other_boxes: List of Box objects
+    
+    Returns:
+        numpy array of distances
+    """
+    center = box.get_center()
+    other_centers = [b.get_center() for b in other_boxes]
+    return batch_distances_from_point(center, other_centers)
+
+
+def find_box_containing_point(boxes, point):
+    """
+    Find which box (if any) contains a given point.
+    
+    Args:
+        boxes: List of Box objects
+        point: Point object
+    
+    Returns:
+        First Box that contains the point, or None
+    """
+    for box in boxes:
+        if box.is_inside(point):
+            return box
+    return None

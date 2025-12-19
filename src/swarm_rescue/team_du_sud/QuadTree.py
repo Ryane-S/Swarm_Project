@@ -11,10 +11,14 @@ class QuadTree:
         self.min_size = min_size
 
     def insert_point(self, point):
-        self.root.insert_occupied(point, self.min_size)
+        self.root.insert_point(point, self.min_size)
 
-    def get_unoccupied_nodes(self):  # might remove this too, see end of class
+    def get_unoccupied_nodes(self):  # might remove this too, see end of class... or not?
         return self.root.collect_unoccupied()
+    
+    def get_pruned_nodes(self):
+        """Get all nodes that were subdivided since last call, then clear."""
+        return self.root.collect_pruned()
 
 
 class Node:
@@ -22,6 +26,7 @@ class Node:
         self.box = box
         self.occupied = False
         self.children = None
+        self.nodes_to_prune = []
 
     def subdivide(self):
         min_x, max_x, min_y, max_y = self.box.get_limits()
@@ -74,9 +79,10 @@ class Node:
         else:
             return self.children[3]
 
-    def insert_occupied(
+    def insert_point(
         self, point: Point, min_size=5
     ):  # should define the minimum size later, most likely gonna be drone size, update: maybe 1/4th?
+        
         if not self.box.is_inside(point):
             return
 
@@ -88,13 +94,15 @@ class Node:
 
         if self.children is None:
             self.subdivide()
-
+            self.nodes_to_prune.append(self)
+        
         child = self.child_for(point)
-        child.insert_occupied(point, min_size)
+        child.insert_point(point, min_size)
 
         if all(child.occupied for child in self.children):
             self.children = None
             self.occupied = True
+        
 
     def is_occupied(self, point) -> bool:
         if not self.box.is_inside(point):
@@ -105,12 +113,36 @@ class Node:
         child = self.child_for(point)
         return child.is_occupied(point)
 
-    def collect_unoccupied(self):  # most likely gonna remove this
+    def collect_unoccupied(self):  # most likely gonna remove this, or not?
         if self.occupied:
             return []
         if not self.children:
             return [self]  # This is an unoccupied leaf
         leaves = []
         for child in self.children:
+            if self.occupied:
+                continue
             leaves.extend(child.collect_unoccupied())
         return leaves
+
+    def collect_pruned(self):
+        """Recursively collect all subdivided nodes, then clear the lists."""
+        result = self.nodes_to_prune[:]
+        self.nodes_to_prune = []
+        if self.children:
+            for child in self.children:
+                result.extend(child.collect_pruned())
+        return result
+
+    def adjacency_list(self, all_unoccupied_nodes):
+        """
+        Returns a list of neighboring nodes from all_unoccupied_nodes.
+        Neighbors are nodes whose boxes touch/are adjacent to this node's box.
+        """
+        neighbors = []
+        for other_node in all_unoccupied_nodes:
+            if other_node is self:
+                continue
+            if self.box.are_neighbors(other_node.box):
+                neighbors.append(other_node)
+        return neighbors
