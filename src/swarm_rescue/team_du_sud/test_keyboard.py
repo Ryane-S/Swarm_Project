@@ -151,11 +151,13 @@ class Stockage():
         pass
 
 # Classe qui construit des chemins à suivre selon les données captées
+'''
 class Path():
     def _init_(self):
         self.strategic_points = []
         self.return_area_postion = None
         self.rescue_center_position = None
+'''
 
 class MyDroneTest(DroneAbstract):
     class Activity(Enum):
@@ -178,7 +180,6 @@ class MyDroneTest(DroneAbstract):
 
         self.last_inside = False
         self.data = Stockage()
-        self.path = Path()
         self.state = self.Activity.EXPLORING
 
     def define_message_for_all(self):

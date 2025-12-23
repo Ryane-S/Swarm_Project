@@ -13,12 +13,16 @@ class QuadTree:
     def insert_point(self, point):
         self.root.insert_point(point, self.min_size)
 
-    def get_unoccupied_nodes(self):  # might remove this too, see end of class... or not?
+    def get_unoccupied_nodes(self):
         return self.root.collect_unoccupied()
     
     def get_pruned_nodes(self):
         """Get all nodes that were subdivided since last call, then clear."""
         return self.root.collect_pruned()
+    
+    def is_occupied(self, point: Point) -> bool:
+        """Vérifie si un point est dans une zone occupée."""
+        return self.root.is_occupied(point)
 
 
 class Node:
@@ -113,14 +117,14 @@ class Node:
         child = self.child_for(point)
         return child.is_occupied(point)
 
-    def collect_unoccupied(self):  # most likely gonna remove this, or not?
+    def collect_unoccupied(self):
         if self.occupied:
             return []
         if not self.children:
             return [self]  # This is an unoccupied leaf
         leaves = []
         for child in self.children:
-            if self.occupied:
+            if child.occupied:  # <-- Corrigé : vérifie child.occupied
                 continue
             leaves.extend(child.collect_unoccupied())
         return leaves

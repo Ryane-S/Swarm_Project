@@ -258,6 +258,33 @@ class Box:
             or Line.is_adjacent(self_lines[1], other_lines[3])
             or Line.is_adjacent(self_lines[3], other_lines[1])
         )
+    
+    def get_closest_point(self, external_point: Point) -> Point:
+        """
+        Retourne le point sur le périmètre de la Box le plus proche du point donné.
+        """
+        min_x, max_x, min_y, max_y = self.get_limits()
+        
+        # Si le point est à l'intérieur de la Box, retourne le point lui-même
+        if min_x <= external_point.x <= max_x and min_y <= external_point.y <= max_y:
+            return external_point
+        
+        # Trouve le point sur le rectangle le plus proche
+        closest_x = max(min_x, min(external_point.x, max_x))
+        closest_y = max(min_y, min(external_point.y, max_y))
+        
+        # Vérifie les bords
+        if external_point.x < min_x:
+            closest_x = min_x
+        elif external_point.x > max_x:
+            closest_x = max_x
+            
+        if external_point.y < min_y:
+            closest_y = min_y
+        elif external_point.y > max_y:
+            closest_y = max_y
+        
+        return Point(closest_x, closest_y)
 
     def __str__(self):
         self.order_points()
