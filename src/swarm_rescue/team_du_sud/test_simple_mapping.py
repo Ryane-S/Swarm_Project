@@ -159,6 +159,7 @@ class Path():
         self.n_points = 0
         self.references = {}
         self.graph = {}
+        self.to_explore = []
 
 class MyDroneTest(DroneAbstract):
     class Activity(Enum):
@@ -193,6 +194,9 @@ class MyDroneTest(DroneAbstract):
         self.return_area_is_detected = False
         self.rescue_center_is_detected = False
         self.points_to_analyse = []
+        self.fixed_position = 0
+        self.fixed_orientation = 0
+        self.previous_point = None
 
     def define_message_for_all(self):
         """
@@ -206,10 +210,13 @@ class MyDroneTest(DroneAbstract):
                                  "rotation": 0.0,
                                  "grasper": 0}
         
+        # Get the position of the drone
         self.actual_position = Point(self.measured_gps_position()[0], self.measured_gps_position()[1])
-        self.orientation = self.compass_values()
-        print(self.compass_values())
+
+        # Get the orientation of the drone
+        self.orientation = round(self.compass_values(), 2)
         '''
+        0,0347 degrees between each ray
         print(self.semantic().ray_angles[17])
         print(len(self.semantic().get_sensor_values()))
         print(self.compass_values()) # Absolute orientation of the nose of the drone
@@ -223,27 +230,41 @@ class MyDroneTest(DroneAbstract):
 
             # The fist point of the graph is the return area
             if len(self.path.graph) == 0 and self.is_inside_return_area :
-                self.path.graph["RA"] = ("explored")
+                self.path.graph["RA"] = ["explored"]
                 self.path.references["RA"] = self.actual_position
                 self.return_area_is_detected = True
-                UP, DOWN, LEFT, RIGHT = Point(self.actual_position.x, self.actual_position.y+50), Point(self.actual_position.x, self.actual_position.y-50), Point(self.actual_position.x+50, self.actual_position.y), Point(self.actual_position.x-50, self.actual_position.y)
+                UP, DOWN, LEFT, RIGHT = ("UP",Point(self.actual_position.x, self.actual_position.y+50)), ("DOWN",Point(self.actual_position.x, self.actual_position.y-50)), ("LEFT",Point(self.actual_position.x+50, self.actual_position.y)), ("RIGHT",Point(self.actual_position.x-50, self.actual_position.y))
                 self.points_to_analyse = [UP, DOWN, LEFT, RIGHT]
-
-            if self.activity == self.Exploring_Activities.DEFINE_NEXT_POINT: # The drone is immobilized during this phase
-                if len(self.points_to_analyse) == 0:
-                    UP, DOWN, LEFT, RIGHT = Point(self.actual_position.x, self.actual_position.y+50), Point(self.actual_position.x, self.actual_position.y-50), Point(self.actual_position.x+50, self.actual_position.y), Point(self.actual_position.x-50, self.actual_position.y)
-                    self.points_to_analyse = [UP, DOWN, LEFT, RIGHT]
-                else:
-                    self.check_cardinal_points()
+                self.check_cardinal_points(lidar_sensor_values)
+                self.previous_point = "RA"
+                self.state = self.Exploring_Activities.GOING_TO_POINT
 
                 return command
 
-            if self.activity == self.Exploring_Activities.GOING_TO_POINT: # The drone moves to next point
+            # Define points and build the graph by exploring them
+            else:
+                if self.activity == self.Exploring_Activities.DEFINE_NEXT_POINT: # The drone is immobilized during this phase
+                    # Measures are noisy so we set a reference
+                    if self.fixed_orientation == 0 and self.fixed_position == 0:
+                        self.fixed_orientation = self.orientation
+                        self.fixed_position = self.actual_drone_position
+
+                    if len(self.points_to_analyse) == 0:
+                        UP, DOWN, LEFT, RIGHT = ("UP",Point(self.fixed_position.x, self.fixed_position.y+50)), ("DOWN",Point(self.fixed_position.x, self.fixed_position.y-50)), ("LEFT",Point(self.fixed_position.x+50, self.fixed_position.y)), ("RIGHT",Point(self.fixed_position.x-50, self.fixed_position.y))
+                        self.points_to_analyse = [UP, DOWN, LEFT, RIGHT]
+
+                    self.previous_point = self.path.n_points
+                    lidar_sensor_values = self.lidar_values()
+                    self.check_cardinal_points(lidar_sensor_values)
+                    self.state = self.Exploring_Activities.GOING_TO_POINT
+
+                    return command
+
+                if self.activity == self.Exploring_Activities.GOING_TO_POINT: # The drone moves to the next point
+                    if self.path.n_points == self.previous_point: # Nothing was added in the graph
+                        pass
                 
-                return command
-
-            # Checks the surroundigs using both lidar THEN semantic sensors
-            self.process_lid_sem_sensors()
+                    return command
 
         # RESCUING STATE
         elif self.state == self.Activity.RESCUING:
@@ -264,15 +285,39 @@ class MyDroneTest(DroneAbstract):
         return {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
     
     # Check if the cardinal points can be explored
-    def check_cardinal_points(self):
+    def check_cardinal_points(self, lidar_sensor_values):
+        feature_points=[]
         for direction in self.points_to_analyse:
-            pass
-    
-    # COMPUTE LIDAR AND SEMANTIC VALUES
-    def process_lid_sem_sensors(self):
-        pass
+            if direction[0] == "UP":
+                diff = (np.pi/2 - self.fixed_orientation + np.pi) % (2 * np.pi) - np.pi
+                idx = max(0, min(180, 90 + int(round(diff / 0.0347))))
+            elif direction[0] == "DOWN":
+                diff = (-np.pi/2 - self.fixed_orientation + np.pi) % (2 * np.pi) - np.pi
+                idx = max(0, min(180, 90 + int(round(diff / 0.0347))))
+            elif direction[0] == "LEFT":
+                diff = (0 - self.fixed_orientation + np.pi) % (2 * np.pi) - np.pi
+                idx = max(0, min(180, 90 + int(round(diff / 0.0347))))
+            else:
+                diff = (np.pi - self.fixed_orientation + np.pi) % (2 * np.pi) - np.pi
+                idx = max(0, min(180, 90 + int(round(diff / 0.0347))))
 
+            # Check if an already defined point is nearby
+            if (lidar_sensor_values[idx] > 60):
+                self.path.n_points += 1
+                self.path.graph[self.path.n_points] = ["explored", self.previous_point]
+                self.path.references[self.path.n_points] = direction[1]
+            else:
+                feature_points.append((direction, idx))
 
+            self.points_to_analyse.remove(direction)
+
+        # Specific obstacles were found
+        if len(feature_points) != 0:
+            self.process_semantic_sensor(feature_points)
+
+    def process_semantic_sensor(self, feature_points):
+        semantic_sensor_values = self.semantic_values()
+                
 
 
 
