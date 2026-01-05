@@ -189,14 +189,16 @@ class MyDroneTest(DroneAbstract):
         self.state = self.Activity.EXPLORING
         self.activity = self.Exploring_Activities.DEFINE_NEXT_POINT
         self.wounded_detected = False
+        self.wounded_positions = []
         #self.data = Stockage()
         self.path = Path()
         self.return_area_is_detected = False
         self.rescue_center_is_detected = False
         self.points_to_analyse = []
-        self.fixed_position = 0
-        self.fixed_orientation = 0
+        self.fixed_position = None
+        self.fixed_orientation = None
         self.previous_point = None
+        self.reset_completed = False
 
     def define_message_for_all(self):
         """
@@ -215,16 +217,17 @@ class MyDroneTest(DroneAbstract):
 
         # Get the orientation of the drone
         self.orientation = round(self.compass_values(), 2)
-        '''
-        0,0347 degrees between each ray
-        print(self.semantic().ray_angles[17])
-        print(len(self.semantic().get_sensor_values()))
-        print(self.compass_values()) # Absolute orientation of the nose of the drone
-        print(self.lidar().ray_angles[0]) # -PI à Droite (relative position)
-        print(self.lidar().ray_angles[90]) # Nose of the drone
-        print(self.lidar().ray_angles[180]) # PI à Gauche (relative position)
-        print(self.lidar().get_sensor_values()[90]) # Distance juste devant le drone
-        '''
+
+        if (self.orientation > 0.02 or self.orientation < -0.02) and self.reset_completed == False:
+            self.state = self.Activity.RESET
+        else:
+            self.reset_completed = True
+            self.state = self.Activity.EXPLORING
+
+        if self.Activity.RESET and self.reset_completed == False:
+            command = self.face_zero_direction()
+            return command
+
         # EXPLORING STATE
         if self.state == self.Activity.EXPLORING:
 
@@ -233,9 +236,9 @@ class MyDroneTest(DroneAbstract):
                 self.path.graph["RA"] = ["explored"]
                 self.path.references["RA"] = self.actual_position
                 self.return_area_is_detected = True
-                UP, DOWN, LEFT, RIGHT = ("UP",Point(self.actual_position.x, self.actual_position.y+50)), ("DOWN",Point(self.actual_position.x, self.actual_position.y-50)), ("LEFT",Point(self.actual_position.x+50, self.actual_position.y)), ("RIGHT",Point(self.actual_position.x-50, self.actual_position.y))
+                UP, DOWN, LEFT, RIGHT = ("UP",Point(self.actual_position.x, self.actual_position.y+70)), ("DOWN",Point(self.actual_position.x, self.actual_position.y-70)), ("LEFT",Point(self.actual_position.x+70, self.actual_position.y)), ("RIGHT",Point(self.actual_position.x-70, self.actual_position.y))
                 self.points_to_analyse = [UP, DOWN, LEFT, RIGHT]
-                self.check_cardinal_points(lidar_sensor_values)
+                self.check_cardinal_points(self.lidar_values())
                 self.previous_point = "RA"
                 self.state = self.Exploring_Activities.GOING_TO_POINT
 
@@ -244,18 +247,23 @@ class MyDroneTest(DroneAbstract):
             # Define points and build the graph by exploring them
             else:
                 if self.activity == self.Exploring_Activities.DEFINE_NEXT_POINT: # The drone is immobilized during this phase
+                    if not self.wounded_detected:
+                        self.wounded_detected = self.search_for_wounded()
+                        if self.wounded_detected:
+                            self.state = self.Activity.RESCUING
+                            return command
+
                     # Measures are noisy so we set a reference
-                    if self.fixed_orientation == 0 and self.fixed_position == 0:
+                    if self.fixed_orientation == None and self.fixed_position == None:
                         self.fixed_orientation = self.orientation
-                        self.fixed_position = self.actual_drone_position
+                        self.fixed_position = self.actual_position
 
                     if len(self.points_to_analyse) == 0:
-                        UP, DOWN, LEFT, RIGHT = ("UP",Point(self.fixed_position.x, self.fixed_position.y+50)), ("DOWN",Point(self.fixed_position.x, self.fixed_position.y-50)), ("LEFT",Point(self.fixed_position.x+50, self.fixed_position.y)), ("RIGHT",Point(self.fixed_position.x-50, self.fixed_position.y))
+                        UP, DOWN, LEFT, RIGHT = ("UP",Point(self.fixed_position.x, self.fixed_position.y+70)), ("DOWN",Point(self.fixed_position.x, self.fixed_position.y-70)), ("LEFT",Point(self.fixed_position.x+70, self.fixed_position.y)), ("RIGHT",Point(self.fixed_position.x-70, self.fixed_position.y))
                         self.points_to_analyse = [UP, DOWN, LEFT, RIGHT]
 
                     self.previous_point = self.path.n_points
-                    lidar_sensor_values = self.lidar_values()
-                    self.check_cardinal_points(lidar_sensor_values)
+                    self.check_cardinal_points(self.lidar_values())
                     self.state = self.Exploring_Activities.GOING_TO_POINT
 
                     return command
@@ -267,7 +275,8 @@ class MyDroneTest(DroneAbstract):
                     return command
 
         # RESCUING STATE
-        elif self.state == self.Activity.RESCUING:
+        if self.state == self.Activity.RESCUING:
+            
             pass
 
         return command
@@ -278,6 +287,9 @@ class MyDroneTest(DroneAbstract):
 
     def draw_graph(self):
         for point in self.path.graph:
+            if point == "RC":
+                arcade.draw_point(self.path.references[point].x+400, self.path.references[point].y+250, arcade.color.BLACK, 10)
+                continue
             arcade.draw_point(self.path.references[point].x+400, self.path.references[point].y+250, arcade.color.RED, 10)
 
     # NO GPS CASE
@@ -289,40 +301,61 @@ class MyDroneTest(DroneAbstract):
         feature_points=[]
         for direction in self.points_to_analyse:
             if direction[0] == "UP":
-                diff = (np.pi/2 - self.fixed_orientation + np.pi) % (2 * np.pi) - np.pi
-                idx = max(0, min(180, 90 + int(round(diff / 0.0347))))
+                idx = 135
             elif direction[0] == "DOWN":
-                diff = (-np.pi/2 - self.fixed_orientation + np.pi) % (2 * np.pi) - np.pi
-                idx = max(0, min(180, 90 + int(round(diff / 0.0347))))
+                idx = 0
             elif direction[0] == "LEFT":
-                diff = (0 - self.fixed_orientation + np.pi) % (2 * np.pi) - np.pi
-                idx = max(0, min(180, 90 + int(round(diff / 0.0347))))
+                idx = 45
             else:
-                diff = (np.pi - self.fixed_orientation + np.pi) % (2 * np.pi) - np.pi
-                idx = max(0, min(180, 90 + int(round(diff / 0.0347))))
-
+                idx = 90
+            
             # Check if an already defined point is nearby
-            if (lidar_sensor_values[idx] > 60):
+            if (lidar_sensor_values[idx] > 70):
                 self.path.n_points += 1
                 self.path.graph[self.path.n_points] = ["explored", self.previous_point]
                 self.path.references[self.path.n_points] = direction[1]
             else:
                 feature_points.append((direction, idx))
 
-            self.points_to_analyse.remove(direction)
-
         # Specific obstacles were found
-        if len(feature_points) != 0:
-            self.process_semantic_sensor(feature_points)
+        if len(feature_points) != 0 and not self.rescue_center_is_detected:
+            self.process_semantic_sensor_for_rescue_center(feature_points)
 
-    def process_semantic_sensor(self, feature_points):
+    def process_semantic_sensor_for_rescue_center(self, feature_points):
         semantic_sensor_values = self.semantic_values()
-                
+        angles_RC = []
+        if semantic_sensor_values is not None:
+            for data in semantic_sensor_values:
+                if data.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER:
+                    angles_RC.append(data.angle)
+            mean = sum(angles_RC) / len(angles_RC)
+            nearest = min([-np.pi/2, 0, np.pi/2, np.pi], key=lambda x: abs(mean - x))
+            for f in feature_points:
+                if (nearest == -np.pi/2 and f[0][0] == "DOWN") or (nearest == 0 and f[0][0] == "LEFT") or (nearest == np.pi and f[0][0] == "RIGHT") or (nearest == np.pi/2 and f[0][0] == "UP"):
+                    self.path.graph["RC"] = ["explored", self.previous_point]
+                    self.path.references["RC"] = f[0][1]
+                    self.rescue_center_is_detected = True
+    
+    def search_for_wounded(self):
+        semantic_sensor_values = self.semantic_values()
+        if semantic_sensor_values is not None:
+            for data in semantic_sensor_values:
+                if data.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON:
+                    self.wounded_positions.append(self.actual_drone_position.add(self.orientation, data.distance, data.angle))
+            if len(self.wounded_positions) != 0:
+                return True
+            return False
+        return False
+    
+    def go_to_point(self):
+        pass
 
-
-
-
-
+    def face_zero_direction(self):
+        if self.orientation > 0:
+            command = {"forward": 0.0, "lateral": 0.0, "rotation": -0.2, "grasper": 0}
+        else:
+            command = {"forward": 0.0, "lateral": 0.0, "rotation": 0.2, "grasper": 0}
+        return command
 
 
     def process_lidar_semantic_sensors(self):
@@ -424,7 +457,7 @@ def main():
     gui = GuiSR(the_map=the_map,
                 draw_lidar_rays=True,
                 draw_semantic_rays=True,
-                use_keyboard=True,
+                use_keyboard=False,
                 )
     gui.run()
 
